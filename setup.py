@@ -14,12 +14,12 @@ requirements = ["requests", "pyyaml"]
 requirements_dev = ["tox", "pytest"]
 
 setup(
-    name="requests-openapi",
-    url="https://github.com/wy-z/requests-openapi",
+    name="requests-openapi-client",
+    url="https://github.com/apendleton/requests-openapi-client",
     license="MIT",
     author="weiyang",
     author_email="weiyang.ones@gmail.com",
-    description="RequestsOpenAPI is a python client library for OpenAPI 3.0",
+    description="RequestsOpenAPIClient is a python client library for OpenAPI 3.0",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
     use_scm_version=True,
