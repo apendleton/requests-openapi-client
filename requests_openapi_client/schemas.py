@@ -42,7 +42,9 @@ class BaseDto:
         return cls(**init_fields)
 
 def deserialize_as(data, data_type):
-    if type(data_type) is type and issubclass(data_type, BaseDto):
+    if data is None:
+        return None
+    elif type(data_type) is type and issubclass(data_type, BaseDto):
         return data_type.deserialize(data)
     elif typing.get_origin(data_type) is list and type(data) is list and typing.get_args(data_type):
         # TODO: what if there are multiple args?
@@ -53,7 +55,9 @@ def deserialize_as(data, data_type):
     return data
 
 def serialize_as(data, data_type):
-    if type(data_type) is type and issubclass(data_type, BaseDto):
+    if data is None:
+        return None
+    elif type(data_type) is type and issubclass(data_type, BaseDto):
         return data.serialize()
     elif typing.get_origin(data_type) is list and type(data) is list and typing.get_args(data_type):
         # TODO: what if there are multiple args?

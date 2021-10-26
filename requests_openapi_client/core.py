@@ -40,6 +40,7 @@ class OpenAPIKeyWord:
     STRING = "string"
     TAGS = "tags"
     REQUEST_BODY = "requestBody"
+    RESPONSES = "responses"
 
 
 class Server:
@@ -78,6 +79,7 @@ class Operation(object):
     _server: Server
     _parameters: typing.List[Parameter]
     _available_types: typing.Dict[str, type]
+    _response_types: typing.Dict[int, type]
 
     _call: typing.Optional[typing.Callable] = None
 
@@ -87,6 +89,7 @@ class Operation(object):
         self._spec = spec
         self._available_types = available_types
         self._parameters = []
+        self._response_types = {}
 
         body = self._spec.get(OpenAPIKeyWord.REQUEST_BODY, None)
         if body:
@@ -121,6 +124,15 @@ class Operation(object):
                 required=param_spec.get(OpenAPIKeyWord.REQUIRED, False),
                 default=default,
             ))
+
+        for status, response in self._spec.get(OpenAPIKeyWord.RESPONSES, {}).items():
+            schema = response\
+                .get("content", {})\
+                .get("application/json", {})\
+                .get("schema", None)
+            if schema:
+                expected_type = type_for_schema(schema, spec, self._available_types)
+                self._response_types[int(status)] = expected_type
 
 
     @property
@@ -190,9 +202,27 @@ class Operation(object):
                 kwargs["json"] = body
             for k, v in client._req_opts.items():
                 kwargs.setdefault(k, v)
-            return client._requestor.request(
+            response = client._requestor.request(
                 self._method, self.url(client._server, **path_params), **kwargs
             )
+
+            # do a little voodoo so we actually get the response body into the exception
+            try:
+                response.raise_for_status()
+            except Exception as e:
+                try:
+                    body = json.dumps(response.json())
+                    message = f"{e.args[0]}; {body}"
+                    e.args = (message,)
+                except:
+                    pass
+                raise e
+
+            data = response.json()
+            if response.status_code in self._response_types:
+                return deserialize_as(data, self._response_types[response.status_code])
+            else:
+                return data
 
         return f
 
