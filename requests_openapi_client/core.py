@@ -7,7 +7,6 @@ import dataclasses
 import builtins
 
 import requests
-# import yaml
 
 from .requestor import Requestor
 from .util import camel_to_snake
@@ -79,14 +78,15 @@ class Operation(object):
     _server: Server
     _parameters: typing.List[Parameter]
     _available_types: typing.Dict[str, type]
-    _response_types: typing.Dict[int, type]
+    _response_types: typing.Dict[typing.Any, type]
 
     _call: typing.Optional[typing.Callable] = None
 
-    def __init__(self, path, method, spec, available_types={}):
+    def __init__(self, path, method, op_spec, full_spec, available_types={}):
         self._path = path
         self._method = method
-        self._spec = spec
+        self._spec = op_spec
+        self._full_spec = full_spec
         self._available_types = available_types
         self._parameters = []
         self._response_types = {}
@@ -95,7 +95,7 @@ class Operation(object):
         if body:
             schema = body.get("content", {}).get("application/json", {}).get("schema", None)
             if schema:
-                body_type = type_for_schema(schema, spec, self._available_types)
+                body_type = type_for_schema(schema, self._full_spec, self._available_types)
             else:
                 body_type = typing.Any
 
@@ -111,7 +111,7 @@ class Operation(object):
         for param_spec in self._spec.get(OpenAPIKeyWord.PARAMETERS, []):
             schema = param_spec.get(OpenAPIKeyWord.SCHEMA, None)
             if schema:
-                param_type = type_for_schema(schema, spec, self._available_types)
+                param_type = type_for_schema(schema, self._full_spec, self._available_types)
                 default = schema.get("default", None)
             else:
                 param_type = typing.Any
@@ -131,8 +131,10 @@ class Operation(object):
                 .get("application/json", {})\
                 .get("schema", None)
             if schema:
-                expected_type = type_for_schema(schema, spec, self._available_types)
-                self._response_types[int(status)] = expected_type
+                if status != "default":
+                    status = int(status)
+                expected_type = type_for_schema(schema, self._full_spec, self._available_types)
+                self._response_types[status] = expected_type
 
 
     @property
@@ -221,6 +223,8 @@ class Operation(object):
             data = response.json()
             if response.status_code in self._response_types:
                 return deserialize_as(data, self._response_types[response.status_code])
+            elif "default" in self._response_types:
+                return deserialize_as(data, self._response_types["default"])
             else:
                 return data
 
@@ -245,7 +249,7 @@ class Operation(object):
         optional_params = []
         builtin_names = dir(builtins)
         for param in self.parameters:
-            annotation = param.type.__name__
+            annotation = getattr(param.type, "__name__", None)
             if not (annotation in op_locals or annotation in globals() or annotation in builtin_names):
                 annotation = "object"
             if param.required or param.in_ == OpenAPIKeyWord.PATH:
@@ -276,11 +280,13 @@ class BaseClient:
     _spec: typing.Dict[str, typing.Any]
     _available_types: typing.Dict[str, type]
 
-    def __init__(self, requestor=None, server=None, req_opts={}):
+    def __init__(self, requestor=None, server=None, req_opts={}, url=None):
         self._requestor = requestor or requests.Session()
         self._req_opts = req_opts
         if server:
             self._server = server
+        elif url:
+            self._server = Server(url=url)
         elif self.servers:
             self._server = self.servers[0]
 
@@ -349,6 +355,7 @@ class BaseClient:
                     path,
                     method,
                     op_spec,
+                    full_spec=cls._spec,
                     available_types=cls._available_types
                 )
                 if operation_id not in cls._operations:

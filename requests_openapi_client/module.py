@@ -8,16 +8,21 @@ def load_spec_from_url(url):
     r = requests.get(url)
     r.raise_for_status()
 
-    return json.load(r.text, Loader=yaml.Loader)
+    return r.json()
 
 
 def load_spec_from_file(file_path):
-    with open(file_path) as f:
-        spec_str = f.read()
-
-    return json.load(spec_str, Loader=yaml.Loader)
+    return json.load(open(file_path))
 
 def build_client_module(spec, module):
     models = add_types_to_module(spec, module)
     client_class = BaseClient.subclass_from_spec(spec, available_types=models)
     setattr(module, client_class.__name__, client_class)
+
+def build_client_module_from_url(url, module):
+    spec = load_spec_from_url(url)
+    build_client_module(spec, module)
+
+def build_client_module_from_file(file_path, module):
+    spec = load_spec_from_file(file_path)
+    build_client_module(spec, module)

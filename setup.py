@@ -10,7 +10,7 @@ def read(filename):
         return fd.read()
 
 
-requirements = ["requests", "pyyaml"]
+requirements = ["requests", "python-dateutil", "jsonpointer"]
 requirements_dev = ["tox", "pytest"]
 
 setup(

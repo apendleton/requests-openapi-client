@@ -71,8 +71,10 @@ def type_for_schema(schema, full_spec, realized_types={}):
     if "$ref" in schema:
         if not schema["$ref"].startswith("#"):
             raise Exception("only '#' refs are supported")
-        if schema["$ref"].startswith("#/components/schemas/") and schema["$ref"].split("/")[-1] in realized_types:
-            return realized_types[schema["$ref"].split("/")[-1]]
+        if schema["$ref"].startswith("#/components/schemas/"):
+            schema_name = format_schema_name(schema["$ref"].split("/")[-1])
+            if schema_name in realized_types:
+                return realized_types[schema_name]
         return type_for_schema(jsonpointer.resolve_pointer(full_spec, schema["$ref"][1:]), full_spec, realized_types)
 
     if "allOf" in schema:
@@ -101,11 +103,16 @@ def update_field_type(model, field_name, new_type):
     model.__init__.__annotations__[field_name] = new_type
     model.__dataclass_fields__[field_name].type = new_type
 
+def format_schema_name(name):
+    # TODO: do better
+    return (name[0].capitalize() + name[1:]).replace("-", "").replace(" ", "")
+
 def add_types_to_module(spec, module):
     # generate dataclasses for all of the schemas
     # first pass -- realize objects as 'object'
     models = {}
     for name, desc in spec.get("components", {}).get("schemas", {}).items():
+        name = format_schema_name(name)
         if desc.get("type", None) == "object":
             properties = []
             name_map = {}
@@ -128,6 +135,7 @@ def add_types_to_module(spec, module):
     # second pass -- update type ascriptions to point to real objects now that
     # they're all realized
     for name, desc in spec.get("components", {}).get("schemas", {}).items():
+        name = format_schema_name(name)
         if desc.get("type", None) == "object":
             model = models[name]
             for prop, prop_schema in desc.get("properties", {}).items():
