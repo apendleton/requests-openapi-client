@@ -1,12 +1,17 @@
 import logging
 import pprint
 import typing
+import json
+import collections
+import dataclasses
+import builtins
 
 import requests
 # import yaml
 
 from .requestor import Requestor
 from .util import camel_to_snake
+from .schemas import type_for_schema, serialize_as, deserialize_as
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +39,7 @@ class OpenAPIKeyWord:
     TYPE = "type"
     STRING = "string"
     TAGS = "tags"
+    REQUEST_BODY = "requestBody"
 
 
 class Server:
@@ -53,6 +59,14 @@ class Server:
     def set_url(self, url):
         self._url = url
 
+@dataclasses.dataclass
+class Parameter:
+    name: str
+    raw_name: str
+    type: type
+    required: bool
+    in_: str
+    default: typing.Any
 
 class Operation(object):
     _internal_param_prefix = "_"
@@ -62,13 +76,52 @@ class Operation(object):
     _requestor: Requestor
     _req_opts: typing.Dict[str, typing.Any]
     _server: Server
+    _parameters: typing.List[Parameter]
+    _available_types: typing.Dict[str, type]
 
     _call: typing.Optional[typing.Callable] = None
 
-    def __init__(self, path, method, spec,):
+    def __init__(self, path, method, spec, available_types={}):
         self._path = path
         self._method = method
         self._spec = spec
+        self._available_types = available_types
+        self._parameters = []
+
+        body = self._spec.get(OpenAPIKeyWord.REQUEST_BODY, None)
+        if body:
+            schema = body.get("content", {}).get("application/json", {}).get("schema", None)
+            if schema:
+                body_type = type_for_schema(schema, spec, self._available_types)
+            else:
+                body_type = typing.Any
+
+            self._parameters.append(Parameter(
+                raw_name="body",
+                name="body",
+                in_=OpenAPIKeyWord.REQUEST_BODY,
+                type=body_type,
+                required=body.get(OpenAPIKeyWord.REQUIRED, False),
+                default=None,
+            ))
+
+        for param_spec in self._spec.get(OpenAPIKeyWord.PARAMETERS, []):
+            schema = param_spec.get(OpenAPIKeyWord.SCHEMA, None)
+            if schema:
+                param_type = type_for_schema(schema, spec, self._available_types)
+                default = schema.get("default", None)
+            else:
+                param_type = typing.Any
+                default = None
+            self._parameters.append(Parameter(
+                raw_name=param_spec[OpenAPIKeyWord.NAME],
+                name=camel_to_snake(param_spec[OpenAPIKeyWord.NAME]),
+                in_=param_spec[OpenAPIKeyWord.IN],
+                type=param_type,
+                required=param_spec.get(OpenAPIKeyWord.REQUIRED, False),
+                default=default,
+            ))
+
 
     @property
     def spec(self):
@@ -88,7 +141,7 @@ class Operation(object):
 
     @property
     def parameters(self):
-        return [spec[OpenAPIKeyWord.NAME] for spec in self._spec.get(OpenAPIKeyWord.PARAMETERS, [])]
+        return self._parameters
 
     def url(self, server, **kwargs):
         return server.url + self._path.format(**kwargs)
@@ -100,23 +153,28 @@ class Operation(object):
             params = {}
             headers = {}
             cookies = {}
-            for spec in self._spec.get(OpenAPIKeyWord.PARAMETERS, []):
-                _in = spec[OpenAPIKeyWord.IN]
-                name = spec[OpenAPIKeyWord.NAME]
-
-                if name not in kwargs:
-                    if _in == OpenAPIKeyWord.PATH:
+            body = None
+            for param in self.parameters:
+                if param.name not in kwargs:
+                    if param.in_ == OpenAPIKeyWord.PATH or param.required:
                         raise ValueError(f"'{name}' is required")
                     continue
 
-                if _in == OpenAPIKeyWord.PATH:
-                    path_params[name] = kwargs.pop(name)
-                elif _in == OpenAPIKeyWord.QUERY:
-                    params[name] = kwargs.pop(name)
-                elif _in == OpenAPIKeyWord.HEADER:
-                    headers[name] = kwargs.pop(name)
-                elif _in == OpenAPIKeyWord.COOKIE:
-                    cookies[name] = kwargs.pop(name)
+                serialized = serialize_as(
+                    kwargs.pop(param.name),
+                    param.type,
+                )
+                if param.in_ == OpenAPIKeyWord.PATH:
+                    path_params[param.raw_name] = serialized
+                elif param.in_ == OpenAPIKeyWord.QUERY:
+                    params[param.raw_name] = serialized
+                elif param.in_ == OpenAPIKeyWord.HEADER:
+                    headers[param.raw_name] = serialized
+                elif param.in_ == OpenAPIKeyWord.COOKIE:
+                    cookies[param.raw_name] = serialized
+                elif param.in_ == OpenAPIKeyWord.REQUEST_BODY:
+                    body = serialized
+
 
             # collect internal params
             for k in list(kwargs.keys()):
@@ -128,6 +186,8 @@ class Operation(object):
             kwargs.setdefault("params", {}).update(params)
             kwargs.setdefault("headers", {}).update(headers)
             kwargs.setdefault("cookies", {}).update(cookies)
+            if body:
+                kwargs["json"] = body
             for k, v in client._req_opts.items():
                 kwargs.setdefault(k, v)
             return client._requestor.request(
@@ -153,39 +213,29 @@ class Operation(object):
 
         required_params = []
         optional_params = []
-        for spec in self._spec.get(OpenAPIKeyWord.PARAMETERS, []):
-            _in = spec[OpenAPIKeyWord.IN]
-            name = spec[OpenAPIKeyWord.NAME]
-            required = spec.get(OpenAPIKeyWord.REQUIRED, False)
-
-            if required or _in == OpenAPIKeyWord.PATH:
-                required_params.append(name)
+        builtin_names = dir(builtins)
+        for param in self.parameters:
+            annotation = param.type.__name__
+            if not (annotation in op_locals or annotation in globals() or annotation in builtin_names):
+                annotation = "object"
+            if param.required or param.in_ == OpenAPIKeyWord.PATH:
+                required_params.append(f"{param.name}: {annotation}")
             else:
-                optional_params.append(name)
+                default = json.dumps(param.default) if param.default is not None else "None"
+                optional_params.append(f"{param.name}: {annotation}={default}")
 
-        signature_params = ", ".join(
-            required_params +\
-            [f"{param}=None" for param in optional_params]
-        )
+        signature_params = ", ".join(required_params + optional_params)
         passthrough_params = ", ".join(
-            [f"{param}={param}" for param in required_params + optional_params]
+            [f"{param.name}={param.name}" for param in self.parameters]
         )
         exec(f"def {op_name}(self, {signature_params}):\n    return op(self, {passthrough_params})", op_locals)
-        setattr(target, op_name, op_locals[op_name])
+        func = op_locals[op_name]
 
+        # update the annotations for any types we couldn't see
+        for param in self.parameters:
+            func.__annotations__[param.name] = param.type
 
-def load_spec_from_url(url):
-    r = requests.get(url)
-    r.raise_for_status()
-
-    return yaml.load(r.text, Loader=yaml.Loader)
-
-
-def load_spec_from_file(file_path):
-    with open(file_path) as f:
-        spec_str = f.read()
-
-    return yaml.load(spec_str, Loader=yaml.Loader)
+        setattr(target, op_name, func)
 
 
 class BaseClient:
@@ -194,6 +244,7 @@ class BaseClient:
     _server: Server
     _operations: typing.Dict[str, typing.Any]
     _spec: typing.Dict[str, typing.Any]
+    _available_types: typing.Dict[str, type]
 
     def __init__(self, requestor=None, server=None, req_opts={}):
         self._requestor = requestor or requests.Session()
@@ -215,7 +266,7 @@ class BaseClient:
         return self._spec
 
     @classmethod
-    def subclass_from_spec(base_cls, spec: typing.Dict, client_name="ApiClient"):
+    def subclass_from_spec(base_cls, spec: typing.Dict, client_name="ApiClient", available_types={}):
         if not all(
             [
                 i in spec
@@ -232,6 +283,8 @@ class BaseClient:
 
         cls._spec = spec.copy()
         _spec = spec.copy()
+
+        cls._available_types = available_types
 
         servers = _spec.pop(OpenAPIKeyWord.SERVERS, [])
         for key in _spec:
@@ -266,6 +319,7 @@ class BaseClient:
                     path,
                     method,
                     op_spec,
+                    available_types=cls._available_types
                 )
                 if operation_id not in cls._operations:
                     cls._operations[operation_id] = op
@@ -326,8 +380,6 @@ class SubApiProxy:
         self._sub_api = sub_api
         self._client = client
 
-    def __getattr__(self, a):
-        # raw function
-        func = getattr(self._sub_api, a)
-        # bind to client
-        return func.__get__(self._client)
+        for func_name, func in sub_api.__dict__.items():
+            # bind to client
+            setattr(self, func_name, func.__get__(self._client))
