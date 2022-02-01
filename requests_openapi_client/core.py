@@ -284,7 +284,10 @@ class BaseClient:
         self._requestor = requestor or requests.Session()
         self._req_opts = req_opts
         if server:
-            self._server = server
+            if type(server) == str:
+                self._server = Server(server)
+            else:
+                self._server = server
         elif url:
             self._server = Server(url=url)
         elif self.servers:
