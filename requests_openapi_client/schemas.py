@@ -64,14 +64,15 @@ def deserialize_as(data, data_type):
 def serialize_as(data, data_type, use_python_names=False):
     if data is None:
         return None
-    elif type(data_type) is type and issubclass(data_type, BaseDto):
+    elif type(data_type) is type and issubclass(data_type, BaseDto) and type(data) is data_type:
         return data.serialize(use_python_names=use_python_names)
     elif typing.get_origin(data_type) is list and type(data) is list and typing.get_args(data_type):
         # TODO: what if there are multiple args?
         item_type = typing.get_args(data_type)[0]
         return [serialize_as(item, item_type, use_python_names=use_python_names) for item in data]
     elif data_type is datetime.datetime and type(data) is datetime.datetime:
-        return data.isoformat()
+        # prefer Z instead of "+00:00" for to UTC, match JS norms
+        return data.isoformat().replace("+00:00", "Z")
     return data
 
 def type_for_schema(schema, full_spec, realized_types={}):
