@@ -64,7 +64,7 @@ def deserialize_as(data, data_type):
 def serialize_as(data, data_type, use_python_names=False):
     if data is None:
         return None
-    elif type(data_type) is type and issubclass(data_type, BaseDto) and type(data) is data_type:
+    elif type(data_type) is type and issubclass(data_type, BaseDto) and issubclass(type(data), BaseDto):
         return data.serialize(use_python_names=use_python_names)
     elif typing.get_origin(data_type) is list and type(data) is list and typing.get_args(data_type):
         # TODO: what if there are multiple args?
