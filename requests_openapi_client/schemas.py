@@ -151,6 +151,7 @@ def add_types_to_module(spec, module):
             model.nullable_fields = nullable_fields
             models[name] = model
 
+            model.__module__ = module.__name__
             setattr(module, name, model)
     # second pass -- update type ascriptions to point to real objects now that
     # they're all realized
