@@ -220,7 +220,9 @@ class Operation(object):
                     pass
                 raise e
 
-            data = response.json()
+            data = (
+                response.json() if int(response.headers["Content-Length"]) > 0 else None
+            )
             if response.status_code in self._response_types:
                 return deserialize_as(data, self._response_types[response.status_code])
             elif "default" in self._response_types:
