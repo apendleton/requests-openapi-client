@@ -53,6 +53,8 @@ def deserialize_as(data, data_type):
         return None
     elif type(data_type) is type and issubclass(data_type, BaseDto):
         return data_type.deserialize(data)
+    elif isinstance(data_type, TaggedUnion):
+        return data_type.deserialize(data)
     elif typing.get_origin(data_type) is list and type(data) is list and typing.get_args(data_type):
         # TODO: what if there are multiple args?
         item_type = typing.get_args(data_type)[0]
@@ -65,6 +67,8 @@ def serialize_as(data, data_type, use_python_names=False):
     if data is None:
         return None
     elif type(data_type) is type and issubclass(data_type, BaseDto) and issubclass(type(data), BaseDto):
+        return data.serialize(use_python_names=use_python_names)
+    elif isinstance(data_type, TaggedUnion) and type(data) in data_type.allowed_types:
         return data.serialize(use_python_names=use_python_names)
     elif typing.get_origin(data_type) is list and type(data) is list and typing.get_args(data_type):
         # TODO: what if there are multiple args?
@@ -93,6 +97,15 @@ def type_for_schema(schema, full_spec, realized_types={}):
             print("warning: can't really support allOf")
             return object
 
+    if "oneOf" in schema:
+        if len(schema["oneOf"]) == 1:
+            return type_for_schema(schema["oneOf"][0], full_spec, realized_types)
+        else:
+            discriminator = schema.get("discriminator", None)
+            if not discriminator:
+                return Exception("oneOf clauses are only supported with accompanying discriminator attributes")
+            return TaggedUnion(schema["oneOf"], discriminator, full_spec, realized_types)
+
     if not "type" in schema:
         raise Exception("schemas must have types or refs")
     if schema["type"] == "array":
@@ -106,10 +119,46 @@ def type_for_schema(schema, full_spec, realized_types={}):
 
     return TYPE_EQUIVALENTS.get(schema["type"], None)
 
+class TaggedUnion:
+    discriminator_field: str
+    discriminator_mapping: typing.Mapping[typing.Any, typing.Any]
+
+    def __init__(self, type_options, discriminator, full_spec, realized_types={}):
+        self.discriminator_field = discriminator.get("propertyName", None)
+        mapping = discriminator.get("mapping", None)
+
+        if not self.discriminator_field or not mapping:
+            raise Exception("discriminator property name and mapping are required")
+
+        types_by_ref = {type_option.get("$ref", None): type_for_schema(type_option, full_spec, realized_types) for type_option in type_options}
+        self.discriminator_mapping = {name: types_by_ref[ref] for name, ref in mapping.items()}
+
+    @property
+    def allowed_types(self):
+        return list(self.discriminator_mapping.values())
+
+    @property
+    def type_for_annotation(self):
+        return typing.Union.__getitem__(tuple(self.allowed_types))
+
+    def deserialize(self, data):
+        type_value = data.get(self.discriminator_field, None)
+        if not type_value:
+            raise Exception("discriminator mapping field not found on union object")
+        if type_value not in self.discriminator_mapping:
+            raise Exception(f"discriminator value {type_value} not in union")
+        return deserialize_as(data, self.discriminator_mapping[type_value])
+
 def update_field_type(model, field_name, new_type):
+    model.__dataclass_fields__[field_name].type = new_type
+
+    if hasattr(new_type, "type_for_annotation"):
+        # for tagged unions, we want the external-display type to be a typing.Union, not our
+        # internal union type
+        new_type = new_type.type_for_annotation
+
     model.__annotations__[field_name] = new_type
     model.__init__.__annotations__[field_name] = new_type
-    model.__dataclass_fields__[field_name].type = new_type
 
 def format_schema_name(name):
     # TODO: do better
