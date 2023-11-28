@@ -369,10 +369,10 @@ class BaseClient:
                     log.warning(
                         f"multiple '{operation_id}' found , operation ID should be unique"
                     )
-                    v = self._operations[operation_id]
+                    v = cls._operations[operation_id]
                     if type(v) is not list:
-                        self._operations[operation_id] = [v]
-                    self._operations[operation_id].append(op)
+                        cls._operations[operation_id] = [v]
+                    cls._operations[operation_id].append(op)
 
                 tags = op_spec.get(OpenAPIKeyWord.TAGS, None)
                 if tags:
