@@ -1,3 +1,4 @@
+import keyword
 import re
 
 CAMEL_NAME_RE = re.compile('(.)([A-Z][a-z]+)')
@@ -7,4 +8,7 @@ def camel_to_snake(name):
     name = name.replace(' ', '_')
     name = CAMEL_NAME_RE.sub(r'\1_\2', name)
     name = CAMEL_RE.sub(r'\1_\2', name).lower().replace("-", "_")
-    return MULTI_UNDER_RE.sub('_', name)
+    name = MULTI_UNDER_RE.sub('_', name)
+    if keyword.iskeyword(name):
+        name = f"{name}_"
+    return name
