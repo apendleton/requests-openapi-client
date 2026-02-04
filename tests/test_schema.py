@@ -195,6 +195,47 @@ def test_tagged_union_deserialize():
     assert isinstance(result, A)
 
 
+def test_tagged_union_deserialize_use_python_names():
+    @dataclasses.dataclass
+    class A(BaseDto):
+        value: int
+        label: str = "default"
+
+    @dataclasses.dataclass
+    class B(BaseDto):
+        pass
+
+    A.name_map = {"value": "Value", "label": "Label"}
+    B.name_map = {}
+
+    union = TaggedUnion(
+        type_options=[
+            {"$ref": "#/components/schemas/A"},
+            {"$ref": "#/components/schemas/B"},
+        ],
+        discriminator={
+            "propertyName": "type",
+            "mapping": {"a": "#/components/schemas/A", "b": "#/components/schemas/B"},
+        },
+        full_spec={},
+        realized_types={"A": A, "B": B},
+    )
+
+    # With use_python_names=True, keys should be lowercase
+    data = {"type": "a", "value": 42, "label": "test"}
+    result = union.deserialize(data, use_python_names=True)
+    assert isinstance(result, A)
+    assert result.value == 42
+    assert result.label == "test"
+
+    # Without use_python_names, keys should be uppercase
+    data = {"type": "a", "Value": 42, "Label": "test"}
+    result = union.deserialize(data, use_python_names=False)
+    assert isinstance(result, A)
+    assert result.value == 42
+    assert result.label == "test"
+
+
 # --- TODO: Tests to implement ---
 
 todo = pytest.mark.skip(reason="TODO")

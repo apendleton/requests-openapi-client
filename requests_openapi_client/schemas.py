@@ -143,13 +143,13 @@ class TaggedUnion:
     def type_for_annotation(self):
         return typing.Union.__getitem__(tuple(self.allowed_types))
 
-    def deserialize(self, data):
+    def deserialize(self, data, use_python_names=False):
         type_value = data.get(self.discriminator_field, None)
         if not type_value:
             raise Exception("discriminator mapping field not found on union object")
         if type_value not in self.discriminator_mapping:
             raise Exception(f"discriminator value {type_value} not in union")
-        return deserialize_as(data, self.discriminator_mapping[type_value])
+        return deserialize_as(data, self.discriminator_mapping[type_value], use_python_names=use_python_names)
 
 def update_field_type(model, field_name, new_type):
     model.__dataclass_fields__[field_name].type = new_type
