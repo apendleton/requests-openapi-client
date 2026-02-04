@@ -37,8 +37,8 @@ class BaseDto:
     def deserialize(cls, data, use_python_names=False):
         init_fields = {}
         for field_name, field in cls.__dataclass_fields__.items():
-            # If use_python_names=True, the data keys are snake_case (same as field_name)
-            # If use_python_names=False, the data keys are camelCase (from name_map)
+            # If use_python_names=True, the data keys are the same as field_name
+            # If use_python_names=False, the data keys are from name_map
             raw_name = field_name if use_python_names else cls.name_map[field_name]
             if raw_name in data:
                 init_fields[field_name] = deserialize_as(data[raw_name], field.type, use_python_names=use_python_names)
