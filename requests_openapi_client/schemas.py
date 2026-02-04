@@ -143,8 +143,22 @@ class TaggedUnion:
     def type_for_annotation(self):
         return typing.Union.__getitem__(tuple(self.allowed_types))
 
+    def _get_discriminator_field_name(self, use_python_names):
+        """Get the discriminator field name, using reverse_name_map from member types if available."""
+        if not use_python_names:
+            return self.discriminator_field
+
+        # Look up the python name from any of the member types' reverse_name_map
+        for member_type in self.allowed_types:
+            if hasattr(member_type, 'reverse_name_map') and self.discriminator_field in member_type.reverse_name_map:
+                return member_type.reverse_name_map[self.discriminator_field]
+
+        # Fallback to camel_to_snake if no mapping found
+        return camel_to_snake(self.discriminator_field)
+
     def deserialize(self, data, use_python_names=False):
-        type_value = data.get(self.discriminator_field, None)
+        field_name = self._get_discriminator_field_name(use_python_names)
+        type_value = data.get(field_name, None)
         if not type_value:
             raise Exception("discriminator mapping field not found on union object")
         if type_value not in self.discriminator_mapping:
