@@ -34,12 +34,14 @@ class BaseDto:
         return out
 
     @classmethod
-    def deserialize(cls, data):
+    def deserialize(cls, data, use_python_names=False):
         init_fields = {}
         for field_name, field in cls.__dataclass_fields__.items():
-            raw_name = cls.name_map[field_name]
+            # If use_python_names=True, the data keys are snake_case (same as field_name)
+            # If use_python_names=False, the data keys are camelCase (from name_map)
+            raw_name = field_name if use_python_names else cls.name_map[field_name]
             if raw_name in data:
-                init_fields[field_name] = deserialize_as(data[raw_name], field.type)
+                init_fields[field_name] = deserialize_as(data[raw_name], field.type, use_python_names=use_python_names)
             elif field.default is not None:
                 init_fields[field_name] = field.default
             elif callable(field.default_factory):
@@ -48,17 +50,17 @@ class BaseDto:
                 init_fields[field_name] = None
         return cls(**init_fields)
 
-def deserialize_as(data, data_type):
+def deserialize_as(data, data_type, use_python_names=False):
     if data is None:
         return None
     elif type(data_type) is type and issubclass(data_type, BaseDto):
-        return data_type.deserialize(data)
+        return data_type.deserialize(data, use_python_names=use_python_names)
     elif isinstance(data_type, TaggedUnion):
-        return data_type.deserialize(data)
+        return data_type.deserialize(data, use_python_names=use_python_names)
     elif typing.get_origin(data_type) is list and type(data) is list and typing.get_args(data_type):
         # TODO: what if there are multiple args?
         item_type = typing.get_args(data_type)[0]
-        return [deserialize_as(item, item_type) for item in data]
+        return [deserialize_as(item, item_type, use_python_names=use_python_names) for item in data]
     elif data_type is datetime.datetime and type(data) is str:
         return dateutil.parser.parse(data)
     return data
